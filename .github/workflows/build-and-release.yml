@@ -1,64 +1,64 @@
 name: 'Build and release'
 
 on:
-	pull_request:
-	push:
-		branches:
-			- 'main'
-	workflow_dispatch:
+  pull_request:
+  push:
+    branches:
+      - 'main'
+  workflow_dispatch:
 
 permissions:
-	contents: 'read'
+  contents: 'read'
 
 jobs:
-	build:
-		runs-on: 'ubuntu-latest'
+  build:
+    runs-on: 'ubuntu-latest'
 
-		steps:
-			- name: 'Check out repository'
-				uses: 'actions/checkout@v4'
+    steps:
+      - name: 'Check out repository'
+        uses: 'actions/checkout@v4'
 
-			- name: 'Install Rust'
-				uses: 'dtolnay/rust-toolchain@stable'
-				with:
-					targets: 'wasm32-wasip1'
+      - name: 'Install Rust'
+        uses: 'dtolnay/rust-toolchain@stable'
+        with:
+          targets: 'wasm32-wasip1'
 
-			- name: 'Build plugin'
-				run: 'cargo build --release --locked'
+      - name: 'Build plugin'
+        run: 'cargo build --release --locked'
 
-			- name: 'Upload build artifact'
-				uses: 'actions/upload-artifact@v4'
-				with:
-					name: 'zellij-autolock'
-					path: 'target/wasm32-wasip1/release/zellij-autolock.wasm'
-					if-no-files-found: 'error'
+      - name: 'Upload build artifact'
+        uses: 'actions/upload-artifact@v4'
+        with:
+          name: 'zellij-autolock'
+          path: 'target/wasm32-wasip1/release/zellij-autolock.wasm'
+          if-no-files-found: 'error'
 
-	release:
-		if: "github.event_name == 'push' && github.ref == 'refs/heads/main'"
-		needs: 'build'
-		runs-on: 'ubuntu-latest'
-		permissions:
-			contents: 'write'
+  release:
+    if: "github.event_name == 'push' && github.ref == 'refs/heads/main'"
+    needs: 'build'
+    runs-on: 'ubuntu-latest'
+    permissions:
+      contents: 'write'
 
-		steps:
-			- name: 'Check out repository'
-				uses: 'actions/checkout@v4'
+    steps:
+      - name: 'Check out repository'
+        uses: 'actions/checkout@v4'
 
-			- name: 'Download build artifact'
-				uses: 'actions/download-artifact@v4'
-				with:
-					name: 'zellij-autolock'
-					path: 'dist'
+      - name: 'Download build artifact'
+        uses: 'actions/download-artifact@v4'
+        with:
+          name: 'zellij-autolock'
+          path: 'dist'
 
-			- name: 'Create latest release'
-				env:
-					GH_TOKEN: '${{ github.token }}'
-				run: |
-					short_sha="${GITHUB_SHA::7}"
-					tag="main-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-					gh release create "$tag" \
-						'dist/zellij-autolock.wasm' \
-						--target "$GITHUB_SHA" \
-						--title "Main build $short_sha" \
-						--notes "Automated build from commit $GITHUB_SHA." \
-						--latest
+      - name: 'Create latest release'
+        env:
+          GH_TOKEN: '${{ github.token }}'
+        run: |
+          short_sha="${GITHUB_SHA::7}"
+          tag="main-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          gh release create "$tag" \
+            'dist/zellij-autolock.wasm' \
+            --target "$GITHUB_SHA" \
+            --title "Main build $short_sha" \
+            --notes "Automated build from commit $GITHUB_SHA." \
+            --latest
