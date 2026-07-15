@@ -16,6 +16,10 @@ struct State {
     latest_tab_pane: TabPane,
     latest_mode: InputMode,
     latest_running_command: String,
+    plugin_locked: bool,
+    pending_plugin_mode: Option<InputMode>,
+    manual_override: bool,
+    mode_initialized: bool,
     print_to_log: bool,
 }
 
@@ -33,6 +37,10 @@ impl Default for State {
             },
             latest_mode: InputMode::Normal,
             latest_running_command: "".to_string(),
+            plugin_locked: false,
+            pending_plugin_mode: None,
+            manual_override: false,
+            mode_initialized: false,
             print_to_log: false,
         }
     }
@@ -75,7 +83,28 @@ impl ZellijPlugin for State {
             }
 
             Event::ModeUpdate(mode_info) => {
-                self.latest_mode = mode_info.mode;
+                let mode = mode_info.mode;
+                let is_plugin_change = self.pending_plugin_mode == Some(mode);
+
+                self.latest_mode = mode;
+                self.pending_plugin_mode = None;
+
+                if self.mode_initialized
+                    && !is_plugin_change
+                    && (mode == InputMode::Locked || mode == InputMode::Normal)
+                {
+                    self.manual_override = true;
+                    self.plugin_locked = false;
+
+                    if self.print_to_log {
+                        eprintln!(
+                            "[autolock] Manual mode change detected: {:?}. Automatic mode changes are paused until the focused command or pane changes.",
+                            mode
+                        );
+                    }
+                }
+
+                self.mode_initialized = true;
                 self.start_timer();
             }
 
@@ -90,6 +119,7 @@ impl ZellijPlugin for State {
                             tab_pos: tab.position,
                             pane_id: u32::MAX,
                         };
+                        self.reset_manual_override();
                     }
                 }
             }
@@ -104,7 +134,7 @@ impl ZellijPlugin for State {
                             tab_pos: self.latest_tab_pane.tab_pos,
                             pane_id: pane.id,
                         };
-
+                        self.reset_manual_override();
                         list_clients();
                     }
                 }
@@ -133,34 +163,20 @@ impl ZellijPlugin for State {
                             if self.print_to_log {
                                 eprintln!(
                                     "[autolock] Detected command: `{}`; Executable: `{}`; Is trigger? {}.",
-                                    running_command,
-                                    running_command_exe,
-                                    is_trigger_cmd,
+                                    running_command, running_command_exe, is_trigger_cmd,
                                 );
                             }
                         } else if self.print_to_log {
                             eprintln!("[autolock] No command detected.");
                         }
 
-                        let target_input_mode = if is_trigger_cmd {
-                            InputMode::Locked
-                        } else if self.latest_mode == InputMode::Locked {
-                            InputMode::Normal
-                        } else {
-                            self.latest_mode
-                        };
-
-                        if self.latest_mode != target_input_mode
-                            && (self.latest_mode == InputMode::Locked
-                                || self.latest_mode == InputMode::Normal)
-                        {
-                            switch_to_input_mode(&target_input_mode);
-                        }
-
                         if running_command != self.latest_running_command {
                             self.latest_running_command = running_command;
+                            self.manual_override = false;
                             self.start_timer();
                         }
+
+                        self.check_and_switch_mode(is_trigger_cmd);
                     }
                 }
             }
@@ -209,6 +225,42 @@ impl ZellijPlugin for State {
 }
 
 impl State {
+    fn check_and_switch_mode(&mut self, is_trigger_cmd: bool) {
+        if self.manual_override || self.pending_plugin_mode.is_some() {
+            return;
+        }
+
+        if is_trigger_cmd && self.latest_mode == InputMode::Normal {
+            self.switch_mode(InputMode::Locked, true);
+        } else if !is_trigger_cmd
+            && self.plugin_locked
+            && self.latest_mode == InputMode::Locked
+        {
+            self.switch_mode(InputMode::Normal, false);
+        } else if !is_trigger_cmd && self.plugin_locked && self.latest_mode != InputMode::Locked {
+            self.plugin_locked = false;
+        }
+    }
+
+    fn switch_mode(&mut self, mode: InputMode, plugin_locked: bool) {
+        self.pending_plugin_mode = Some(mode);
+        self.plugin_locked = plugin_locked;
+
+        if self.print_to_log {
+            eprintln!(
+                "[autolock] Switching to {:?}; plugin owns lock: {}.",
+                mode, plugin_locked
+            );
+        }
+
+        switch_to_input_mode(&mode);
+    }
+
+    fn reset_manual_override(&mut self) {
+        self.manual_override = false;
+        self.latest_running_command.clear();
+    }
+
     fn load_configuration(&mut self, configuration: BTreeMap<String, String>) {
         if let Some(is_enabled) = configuration.get("is_enabled") {
             self.is_enabled = matches!(is_enabled.trim(), "true" | "t" | "y" | "1");
