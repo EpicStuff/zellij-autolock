@@ -83,23 +83,24 @@ impl ZellijPlugin for State {
             }
 
             Event::ModeUpdate(mode_info) => {
+                let previous_mode = self.latest_mode;
                 let mode = mode_info.mode;
                 let is_plugin_change = self.pending_plugin_mode == Some(mode);
+                let is_manual_lock_change = previous_mode != mode
+                    && (mode == InputMode::Locked
+                        || (previous_mode == InputMode::Locked && mode == InputMode::Normal));
 
                 self.latest_mode = mode;
                 self.pending_plugin_mode = None;
 
-                if self.mode_initialized
-                    && !is_plugin_change
-                    && (mode == InputMode::Locked || mode == InputMode::Normal)
-                {
+                if self.mode_initialized && !is_plugin_change && is_manual_lock_change {
                     self.manual_override = true;
                     self.plugin_locked = false;
 
                     if self.print_to_log {
                         eprintln!(
-                            "[autolock] Manual mode change detected: {:?}. Automatic mode changes are paused until the focused command or pane changes.",
-                            mode
+                            "[autolock] Manual lock change detected: {:?} -> {:?}. Automatic mode changes are paused until the focused command or pane changes.",
+                            previous_mode, mode
                         );
                     }
                 }
